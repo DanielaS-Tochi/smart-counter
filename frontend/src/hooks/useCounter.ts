@@ -2,7 +2,6 @@ import { useState, useCallback } from "react";
 import { createPublicClient, createWalletClient, http, custom, defineChain } from "viem";
 import counterAbi from "../abi/Counter.json";
 
-// Define la chain Hardhat con chainId 31337
 const hardhatChain = defineChain({
   id: 31337,
   name: "Hardhat",
@@ -20,6 +19,8 @@ const RPC_URL = "http://localhost:8545"; // O la URL de tu red (Hardhat, Sepolia
 export function useCounter() {
   const [count, setCount] = useState<bigint>(0n);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [txHash, setTxHash] = useState<string | null>(null);
 
   const client = createPublicClient({
     transport: http(RPC_URL),
@@ -43,49 +44,59 @@ export function useCounter() {
 
   const increment = useCallback(async () => {
     try {
+      setLoading(true);
+      setError(null);
+      setTxHash(null);
       if (!window.ethereum) throw new Error("MetaMask no está disponible");
       const walletClient = createWalletClient({
         chain: hardhatChain,
         transport: custom(window.ethereum),
       });
       const [account] = await walletClient.getAddresses();
-      await walletClient.writeContract({
+      const hash = await walletClient.writeContract({
         address: CONTRACT_ADDRESS,
         abi: counterAbi,
         functionName: "increment",
         account,
       });
-      setError(null);
-      // Actualiza el contador después de la transacción
+      setTxHash(hash as string);
+      // Espera a que la transacción sea minada antes de actualizar el contador
+      await client.waitForTransactionReceipt({ hash });
       const value = await client.readContract({
         address: CONTRACT_ADDRESS,
         abi: counterAbi,
         functionName: "count",
       });
+      console.log("Valor del contador:", value); // <-- ¿Qué imprime esto?
       setCount(value as bigint);
     } catch (err: unknown) {
       console.error(err);
       if (err instanceof Error) setError(err.message);
       else setError("Error al incrementar");
+    } finally {
+      setLoading(false);
     }
   }, [client]);
 
   const decrement = useCallback(async () => {
     try {
+      setLoading(true);
+      setError(null);
+      setTxHash(null);
       if (!window.ethereum) throw new Error("MetaMask no está disponible");
       const walletClient = createWalletClient({
         chain: hardhatChain,
         transport: custom(window.ethereum),
       });
       const [account] = await walletClient.getAddresses();
-      await walletClient.writeContract({
+      const hash = await walletClient.writeContract({
         address: CONTRACT_ADDRESS,
         abi: counterAbi,
         functionName: "decrement",
         account,
       });
-      setError(null);
-      // Actualiza el contador después de la transacción
+      setTxHash(hash as string);
+      await client.waitForTransactionReceipt({ hash });
       const value = await client.readContract({
         address: CONTRACT_ADDRESS,
         abi: counterAbi,
@@ -96,8 +107,10 @@ export function useCounter() {
       console.error(err);
       if (err instanceof Error) setError(err.message);
       else setError("Error al decrementar");
+    } finally {
+      setLoading(false);
     }
   }, [client]);
 
-  return { count, fetchCount, increment, decrement, error };
+  return { count, fetchCount, increment, decrement, error, loading, txHash };
 }
